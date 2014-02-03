@@ -1,0 +1,102 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+
+require 'yaml'
+require 'fileutils'
+require 'shellwords'
+
+require File.expand_path('../../lib/clone_remote_db', __FILE__)
+
+loader = CloneRemoteDb::Loader.new(File.basename(__FILE__))
+cli_opts = loader.parse_opts!
+
+def escape_opts(opts)
+  if opts.is_a?(Enumerable)
+    opts.map { |o| Shellwords.escape(o) }.join(' ')
+  elsif opts.nil? || opts == ''
+    ''
+  else
+    Shellwords.escape(opts.to_s)
+  end
+end
+
+def run_cmd(cmd, msg, opts = {})
+  start_time = Time.now
+  puts ">> [#{start_time}] #{msg}: #{cmd}"
+
+  unless opts[:dry_run]
+    pipe = IO.popen(cmd)
+    while (line = pipe.gets)
+      print line
+    end
+  end
+
+  end_time = Time.now
+  puts "<< [#{end_time} %.1fs] #{msg}" % [end_time - start_time]
+end
+
+config_file = File.join(ENV['HOME'], '.clone_remote_db.yml')
+if File.exist?(config_file)
+  CONFIG = YAML.load(File.read(config_file))
+else
+  CONFIG = { 'environments' => {} }
+end
+
+# merge the CLI options with the configuration from the YAML file
+cmd = ARGV.shift
+if cmd
+  cmd_config = CONFIG['environments'][cmd]
+  if cmd_config
+    cmd_config = cmd_config.symbolize_keys
+    loader.options.merge!(cmd_config.select { |k,v| cli_opts[k].nil? })
+  else
+    loader.die("unknown subcommand #{cmd}")
+  end
+end
+
+opts = loader.options
+
+[:local_db, :remote_db, :host].each do |opt|
+  loader.die(opt, "is required") unless opts[opt]
+end
+
+loader.die(:import_only, "file not found") if opts[:import_only] && !File.exist?(opts[:import_only])
+
+# gzip compression options
+gzip_opts = opts[:gzip_opts]
+
+# pg_dump exclude-table-data tables
+pg_exclude_data = opts[:pg_exclude_data]
+
+db_name = opts[:remote_db]
+local_dbname = opts[:local_db]
+host = opts[:host]
+
+# pg_dump setup
+pg_user = opts[:remote_user]
+pg_options = opts[:pg_dump_opts] << "-x #{escape_opts(db_name)}"
+pg_options_joined = pg_exclude_data.map { |t| '--exclude-table-data=' + escape_opts(t) }.
+  join(' ') + ' ' + pg_options.join(' ')
+pg_dump_part = "pg_dump #{pg_options_joined}"
+
+local_dest = loader.replace_variables(opts[:local_dest])
+now = Time.now
+output_file = File.expand_path(now.strftime(local_dest))
+dir_name = File.dirname(output_file)
+
+FileUtils.mkdir_p(dir_name) unless opts[:dry_run]
+
+gzip_part = "gzip #{escape_opts(opts[:gzip_opts])}"
+sudo_part = %~sudo -u #{pg_user} #{pg_dump_part} | #{gzip_part}~
+
+if opts[:import_only]
+  output_file = loader.replace_variables(opts[:import_only])
+else
+  ssh_cmd = %~ssh #{host} "#{sudo_part}" > #{output_file}~
+  run_cmd(ssh_cmd, "downloading #{db_name}", opts)
+end
+
+import_cmd = "gunzip --stdout #{output_file} | psql #{local_dbname}"
+run_cmd(import_cmd, "importing #{db_name} into #{local_dbname}", opts)
+
+# vim: set ft=ruby :
