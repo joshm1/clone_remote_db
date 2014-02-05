@@ -48,12 +48,16 @@ if cmd
   cmd_config = CONFIG['environments'][cmd]
   if cmd_config
     cmd_config = cmd_config.symbolize_keys
-    loader.options.merge!(cmd_config.select { |k,v| cli_opts[k].nil? })
+
+    # do not merge parameters that were set from the command line
+    cmd_config_opts = cmd_config.select { |k,v| cli_opts[k].nil? }
+    loader.options.merge!(cmd_config_opts)
   else
     loader.die("unknown subcommand #{cmd}")
   end
 end
 
+loader.load_defaults!
 opts = loader.options
 
 [:local_db, :remote_db, :host].each do |opt|
@@ -66,7 +70,7 @@ loader.die(:import_only, "file not found") if opts[:import_only] && !File.exist?
 gzip_opts = opts[:gzip_opts]
 
 # pg_dump exclude-table-data tables
-pg_exclude_data = opts[:pg_exclude_data]
+pg_exclude_data = opts[:exclude_table_data]
 
 db_name = opts[:remote_db]
 local_dbname = opts[:local_db]
@@ -75,7 +79,9 @@ host = opts[:host]
 # pg_dump setup
 pg_user = opts[:remote_user]
 pg_options = opts[:pg_dump_opts] << "-x #{escape_opts(db_name)}"
-pg_options_joined = pg_exclude_data.map { |t| '--exclude-table-data=' + escape_opts(t) }.
+pg_options_joined = \
+  (pg_exclude_data.is_a?(String) ? pg_exclude_data.split(',') : pg_exclude_data).
+  map { |t| '--exclude-table-data=' + escape_opts(t) }.
   join(' ') + ' ' + pg_options.join(' ')
 pg_dump_part = "pg_dump #{pg_options_joined}"
 

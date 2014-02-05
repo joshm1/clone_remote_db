@@ -16,6 +16,8 @@ class CloneRemoteDb::Loader
       opt(opts, :host, "Host of the postgresql database", arg: 'HOST', short: '-h')
       opt(opts, :import_only, "Skip download and provide path to dump.sql.gz file", arg: 'PATH')
       opt(opts, :local_dest, "The path to save the dump.sql.gz file to", arg: 'PATH')
+      opt(opts, :remote_user, "Sudo as this user on the remote server", arg: 'USER')
+      opt(opts, :exclude_table_data, "Do not download data from these table(s). Separate multiple tables by comma.", arg: 'TABLE')
       opt(opts, :dry_run, "Don't actually do anything", short: '-n')
     end.parse!
     options
@@ -54,23 +56,23 @@ EOS
     arg << " #{arg_opts[:arg]}" if arg_opts[:arg]
     on_args = [arg, msg]
     on_args.unshift(arg_opts[:short]) if arg_opts[:short]
-    opts.on(*on_args, msg) do |v|
+    opts.on(*on_args) do |v|
       options[key] = v
     end
   end
 
   def options
-    @options ||= {}.merge(defaults)
+    @options ||= {}
   end
 
-  def defaults
-    {
+  def load_defaults!
+    @options = {
       local_dest: '~/pg_dumps/{remote_db}/%Y-%m/%Y-%m-%d_%H.%M.sql.gz',
       gzip_opts: %w(-9 --stdout),
       pg_dump_opts: %w(-c -O),
-      pg_exclude_data: %w(versions),
+      exclude_table_data: %w(versions),
       remote_user: 'postgres'
-    }
+    }.merge(options)
   end
 
   def replace_variables(str)
