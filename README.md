@@ -1,3 +1,5 @@
+> **Archived 2026-10-04.** No longer maintained.
+
 # clone_remote_db
 
 Simple script to backup a PostgreSQL database from a remote server, and restore
